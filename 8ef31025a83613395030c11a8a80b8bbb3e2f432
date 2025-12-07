@@ -16,6 +16,24 @@
       "message": "Isn\u0027t just stock_defconfig enough for this?",
       "revId": "8ef31025a83613395030c11a8a80b8bbb3e2f432",
       "serverId": "58543e18-2196-4633-8043-7787712585ad"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "b8912727_d4ccab3e",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 8
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000036
+      },
+      "writtenOn": "2025-12-07T17:06:14Z",
+      "side": 1,
+      "message": "Yeah it should be fine. I just didn\u0027t edit later on",
+      "parentUuid": "e9937589_dbce68ba",
+      "revId": "8ef31025a83613395030c11a8a80b8bbb3e2f432",
+      "serverId": "58543e18-2196-4633-8043-7787712585ad"
     }
   ]
 }
