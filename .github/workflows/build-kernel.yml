@@ -1,0 +1,183 @@
+# .github/workflows/build-kernel.yml
+
+name: Build Kernel - Sweet (Redmi Note 10 Pro)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_variant:
+        description: 'Kernel variant to build'
+        required: true
+        default: 'non-rooted'
+        type: choice
+        options:
+          - non-rooted
+          - rooted-ksu-next
+
+permissions:
+  contents: write
+
+env:
+  DEVICE_CODENAME: sweet
+  DEVICE_NAME: "Redmi Note 10 Pro"
+  KERNEL_DEFCONFIG: sweet_defconfig
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-linux-gnu-
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      kernel_version: ${{ steps.kernel_info.outputs.version }}
+      build_date: ${{ steps.ts.outputs.DATE }}
+      build_time: ${{ steps.ts.outputs.TIME }}
+      zip_name: ${{ steps.package.outputs.zip_name }}
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Generate timestamps and build info
+        id: ts
+        run: |
+          DATE=$(date +'%Y%m%d')
+          TIME=$(date +'%s')
+          DATETIME=$(date +'%Y-%m-%d %H:%M:%S')
+          echo "DATE=$DATE" >> $GITHUB_OUTPUT
+          echo "TIME=$TIME" >> $GITHUB_OUTPUT
+          echo "DATETIME=$DATETIME" >> $GITHUB_OUTPUT
+
+      - name: Get kernel version info
+        id: kernel_info
+        run: |
+          VERSION=$(grep "^VERSION = " Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep "^PATCHLEVEL = " Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep "^SUBLEVEL = " Makefile | awk '{print $3}')
+          KERNEL_VERSION="${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
+          echo "version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc build-essential bison flex zip p7zip-full \
+            libc6 curl libstdc++6 git wget libssl-dev zstd \
+            lld python3 patchutils ccache
+
+      - name: Install Clang/LLVM toolchain
+        run: |
+          wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y clang-15 lld-15
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-kernel-${{ env.DEVICE_CODENAME }}
+
+      - name: Clone KernelSU-Next (rooted variant)
+        if: github.event.inputs.kernel_variant == 'rooted-ksu-next'
+        run: |
+          mkdir -p drivers
+          git clone https://github.com/KernelSU-Next/KernelSU-Next.git \
+            --depth=1 -b main drivers/kernelsu
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo "obj-y += kernelsu/" >> drivers/Makefile
+          fi
+
+      - name: Configure kernel
+        run: |
+          make O=out ARCH=${{ env.ARCH }} ${{ env.KERNEL_DEFCONFIG }}
+          
+          if [ "${{ github.event.inputs.kernel_variant }}" = "rooted-ksu-next" ]; then
+            echo "CONFIG_KPROBES=y" >> out/.config
+            echo "CONFIG_HAVE_KPROBES=y" >> out/.config
+            echo "CONFIG_KUSER_HELPERS=y" >> out/.config
+          fi
+          
+          make O=out ARCH=${{ env.ARCH }} oldconfig
+
+      - name: Build kernel
+        env:
+          LLVM: 1
+          LLVM_IAS: 1
+        run: |
+          echo "🔨 Starting kernel compilation..."
+          make O=out \
+            ARCH=${{ env.ARCH }} \
+            CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            CC=clang-15 \
+            LD=lld-15 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            -j$(nproc)
+
+      - name: Verify kernel image
+        id: artifacts
+        run: |
+          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+            echo "✅ Kernel image built successfully!"
+            ls -lh out/arch/arm64/boot/Image.gz-dtb
+            echo "kernel_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Kernel image not found!"
+            exit 1
+          fi
+
+      - name: Clone AnyKernel3
+        if: steps.artifacts.outputs.kernel_found == 'true'
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3 --depth=1
+          cd AnyKernel3
+          sed -i 's/device.name1=.*/device.name1=sweet/' anykernel.sh
+
+      - name: Create flashable package
+        id: package
+        if: steps.artifacts.outputs.kernel_found == 'true'
+        run: |
+          VARIANT="${{ github.event.inputs.kernel_variant }}"
+          case "$VARIANT" in
+            "rooted-ksu-next")
+              VARIANT_NAME="KSUNext"
+              ;;
+            *)
+              VARIANT_NAME="Stock"
+              ;;
+          esac
+          
+          ZIP_NAME="Kernel-${{ env.DEVICE_CODENAME }}-${VARIANT_NAME}-${{ steps.ts.outputs.DATE }}"
+          
+          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          cd AnyKernel3
+          zip -r9 "../${ZIP_NAME}.zip" * -x "*.git*"
+          cd ..
+          
+          if [ -f "${ZIP_NAME}.zip" ]; then
+            echo "✅ Flashable ZIP created!"
+            ls -lh "${ZIP_NAME}.zip"
+            echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          else
+            echo "❌ ZIP creation failed!"
+            exit 1
+          fi
+
+      - name: Upload Release
+        if: steps.package.outputs.zip_name
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.package.outputs.zip_name }}.zip
+          tag_name: kernel-${{ steps.ts.outputs.DATE }}-${{ github.event.inputs.kernel_variant }}
+          name: "${{ env.DEVICE_NAME }} Kernel - ${{ steps.ts.outputs.DATE }}"
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "✅ BUILD COMPLETE"
+          echo "Device: ${{ env.DEVICE_NAME }}"
+          echo "Variant: ${{ github.event.inputs.kernel_variant }}"
+          echo "Package: ${{ steps.package.outputs.zip_name }}.zip"
