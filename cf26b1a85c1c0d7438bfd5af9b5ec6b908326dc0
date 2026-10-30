@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "febf9f40_d33e7a96",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 2
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000151
+      },
+      "writtenOn": "2026-10-30T20:37:30Z",
+      "side": 1,
+      "message": "Hey, could you tell me which device or kernel source you ported this LN8000 charging stack from? We use the same charging hardware on ziyi, and I\u0027m interested in adapting your implementation to our device.",
+      "revId": "cf26b1a85c1c0d7438bfd5af9b5ec6b908326dc0",
+      "serverId": "58543e18-2196-4633-8043-7787712585ad"
+    }
+  ]
+}
